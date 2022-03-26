@@ -1,3 +1,22 @@
+///////////////////////////////////////////////////////////////////////////
+//
+// ------------------------------------------------------------------------
+//   _____      _            _ _
+//  |  _  |    | |          | (_)
+//  | |/' | ___| |_ ___   __| |_  ___ ___
+//  |  /| |/ __| __/ _ \ / _` | |/ __/ _ \
+//  \ |_/ / (__| || (_) | (_| | | (_|  __/
+//   \___/ \___|\__\___/ \__,_|_|\___\___|
+//
+// ------------------------------------------------------------------------
+//
+//  Projet de traitement d'image Master 1 Informatique
+//  ~ Thomas DUMONT A.K.A 0ctodice
+//
+// ------------------------------------------------------------------------
+//
+///////////////////////////////////////////////////////////////////////////
+
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -41,50 +60,6 @@ cv::Mat gaussianKernel(double sigma)
   return kernel;
 }
 
-cv::Vec3b gaussianAt(const cv::Mat &src, const cv::Mat &kernel, int x, int y)
-{
-  auto offset = kernel.rows / 2;
-
-  cv::Vec3b sum = 0;
-
-  int kX = 0;
-  int kY = 0;
-
-  for (int nx = x - offset; nx <= x + offset; nx++)
-  {
-    kY = 0;
-    for (int ny = y - offset; ny <= y + offset; ny++)
-    {
-      if (nx >= 0 && ny >= 0 && nx < src.cols && ny < src.rows)
-      {
-        sum += src.at<cv::Vec3b>(ny, nx) * kernel.at<double>(kY, kX);
-      }
-      kY++;
-    }
-    kX++;
-  }
-
-  return sum;
-}
-
-cv::Mat blur(const cv::Mat &src, double sigma)
-{
-  cv::Mat dst;
-  src.copyTo(dst);
-
-  auto kernel = gaussianKernel(sigma);
-
-  for (int x = 0; x < src.cols; x++)
-  {
-    for (int y = 0; y < src.rows; y++)
-    {
-      dst.at<cv::Vec3b>(y, x) = gaussianAt(src, kernel, x, y);
-    }
-  }
-
-  return dst;
-}
-
 cv::Vec3b depthGaussianAt(const cv::Mat &src, const cv::Mat &depth_src, int depth, const cv::Mat &kernel, int x, int y)
 {
   auto offset = kernel.rows / 2;
@@ -118,7 +93,7 @@ cv::Vec3b depthGaussianAt(const cv::Mat &src, const cv::Mat &depth_src, int dept
   return sum;
 }
 
-cv::Mat depthBlur(const cv::Mat &src, const cv::Mat &depth_src, double sigma, int depth)
+cv::Mat depthBlur(const cv::Mat &src, const cv::Mat &depth_src, int depth)
 {
   cv::Mat dst;
   src.copyTo(dst);
@@ -152,28 +127,16 @@ int main(int argc, char **argv)
 {
   // check arguments
 
-  if (argc != 5)
+  if (argc != 4)
   {
-    std::cout << "usage: " << argv[0] << "image depth_image blur_level depth_level" << std::endl;
+    std::cout << "usage: " << argv[0] << "image depth_image depth_level" << std::endl;
     return -1;
   }
-
-  // if (argv[1] == "no-stereo" && argc != 6)
-  // {
-  //   std::cout << "usage: " << argv[0] << " stereo image depth_image blur_level depth_level" << std::endl;
-  //   return -1;
-  // }
-  // else if (argv[1] == "stereo" && argc != 5)
-  // {
-  //   std::cout << "usage: " << argv[0] << "stereo image blur_level depth_level" << std::endl;
-  //   return -1;
-  // }
 
   // load the input image
   std::cout << "load image ..." << std::endl;
   cv::Mat image = cv::imread(argv[1]);
   cv::Mat depth = cv::imread(argv[2], cv::IMREAD_GRAYSCALE);
-  // cv::Mat depth = argv[1] == "no-stereo" ? cv::imread(argv[2], cv::IMREAD_GRAYSCALE) : imageToDepth(image);
 
   if (image.empty())
   {
@@ -189,7 +152,7 @@ int main(int argc, char **argv)
 
   std::cout << "image size : " << image.cols << " x " << image.rows << std::endl;
 
-  cv::Mat blur = depthBlur(image, depth, std::stod(argv[3]), std::stoi(argv[4]));
+  cv::Mat blur = depthBlur(image, depth, std::stoi(argv[3]));
 
   // setup a window
   cv::namedWindow("image", 1);
