@@ -25,64 +25,68 @@
 #include <iostream>
 #include <string>
 #include <map>
-#include <array>
 
 cv::Mat gaussianKernel(double sigma)
 {
-  int size = 2 * (int)ceil(3. * sigma) + 1;
-  cv::Mat kernel = cv::Mat{size, size, CV_64F, cv::Scalar(0.)};
+  int size = 2 * static_cast<int>(ceil(3. * sigma)) + 1;
+  cv::Mat kernel = cv::Mat(size, size, CV_64F, cv::Scalar(0.));
 
-  int offset = size / 2;
-  double coef = 1. / (2. * (double)M_PI * (sigma * sigma));
+  double coef = 1. / (2. * static_cast<double>(M_PI) * pow(sigma, 2.));
 
-  double tot = 0.;
+  auto offset = size / 2;
 
-  for (int x = (-1) * offset; x <= offset; x++)
+  double sum = 0.;
+
+  for (int x = -1 * offset; x <= offset; x++)
   {
-    for (int y = (-1) * offset; y <= offset; y++)
+    double powX = pow(static_cast<double>(x), 2.);
+    for (int y = -1 * offset; y <= offset; y++)
     {
-      double sqrX = pow(x, 2);
-      double sqrY = pow(y, 2);
-
-      kernel.at<double>((kernel.rows / 2) + y, (kernel.cols / 2) + x) = coef * exp(-(sqrX + sqrY) / (2. * sigma * sigma));
-      tot += kernel.at<double>((kernel.rows / 2) + y, (kernel.cols / 2) + x);
+      double powY = pow(static_cast<double>(y), 2.);
+      double value = coef * exp(-(powX + powY) / (2. * pow(sigma, 2.)));
+      kernel.at<double>(offset + y, offset + x) = value;
+      sum += value;
     }
   }
 
-  for (int x = 0; x < kernel.cols; x++)
-  {
-    for (int y = 0; y < kernel.rows; y++)
-    {
-      kernel.at<double>(y, x) /= tot;
-    }
-  }
+  kernel /= sum;
 
   return kernel;
 }
 
-cv::Vec3b depthGaussianAt(const cv::Mat &src, const cv::Mat &depth_src, int depth, const cv::Mat &kernel, int x, int y)
+cv::Vec3b depthBlurAt(const cv::Mat &image_src, const cv::Mat &depth_map, const cv::Mat &kernel, int depth_level, int ox, int oy)
 {
   auto offset = kernel.rows / 2;
 
-  cv::Vec3b sum = 0;
+  double r = 0.;
+  double g = 0.;
+  double b = 0.;
 
   int kX = 0;
-  int kY = 0;
 
-  for (int nx = x - offset; nx <= x + offset; nx++)
+  for (int x = ox - offset; x <= ox + offset; x++)
   {
-    kY = 0;
-    for (int ny = y - offset; ny <= y + offset; ny++)
+    int kY = 0;
+    for (int y = oy - offset; y <= oy + offset; y++)
     {
-      if (nx >= 0 && ny >= 0 && nx < src.cols && ny < src.rows)
+      if (ox >= 0 && oy >= 0 && ox < image_src.cols && oy < image_src.rows)
       {
-        if (depth_src.at<unsigned char>(ny, nx) <= depth)
+        if (depth_map.at<uchar>(y, x) <= depth_level)
         {
-          sum += src.at<cv::Vec3b>(ny, nx) * kernel.at<double>(kY, kX);
+          b += static_cast<double>(image_src.at<cv::Vec3b>(y, x)[0]) * kernel.at<double>(kY, kX);
+          g += static_cast<double>(image_src.at<cv::Vec3b>(y, x)[1]) * kernel.at<double>(kY, kX);
+          r += static_cast<double>(image_src.at<cv::Vec3b>(y, x)[2]) * kernel.at<double>(kY, kX);
         }
         else
         {
-          sum += src.at<cv::Vec3b>(ny - 2 * (ny - y), nx - 2 * (nx - x)) * kernel.at<double>(kY - 2 * (kY - offset), kX - 2 * (kX - offset));
+          auto nx = x - 2 * (x - ox);
+          auto ny = y - 2 * (y - oy);
+          if (ny >= 0 && nx >= 0 && nx < image_src.cols && ny < image_src.rows)
+          {
+            b += static_cast<double>(image_src.at<cv::Vec3b>(ny, nx)[0]) * kernel.at<double>(kY, kX);
+            g += static_cast<double>(image_src.at<cv::Vec3b>(ny, nx)[1]) * kernel.at<double>(kY, kX);
+            r += static_cast<double>(image_src.at<cv::Vec3b>(ny, nx)[2]) * kernel.at<double>(kY, kX);
+          }
         }
       }
       kY++;
@@ -90,36 +94,77 @@ cv::Vec3b depthGaussianAt(const cv::Mat &src, const cv::Mat &depth_src, int dept
     kX++;
   }
 
-  return sum;
+  return cv::Vec3b{static_cast<uchar>(b), static_cast<uchar>(g), static_cast<uchar>(r)};
 }
 
-cv::Mat depthBlur(const cv::Mat &src, const cv::Mat &depth_src, int depth)
+cv::Mat cleanDepthBlur(const cv::Mat &image_src, const cv::Mat &depth_map, int depth_level)
 {
-  cv::Mat dst;
-  src.copyTo(dst);
+  cv::Mat image_dst;
+  image_src.copyTo(image_dst);
 
-  std::array<cv::Mat, 256> kernels;
+  std::map<uchar, cv::Mat> kernels;
 
-  for (int x = 0; x < src.cols; x++)
+  double factor = depth_level <= 85 ? 1. : depth_level <= 170 ? 2.
+                                                              : 3.;
+
+  cv::Mat kernel = gaussianKernel(factor * static_cast<double>(depth_level) / 100.);
+
+  for (int x = 0; x < image_dst.cols; x++)
   {
-    for (int y = 0; y < src.rows; y++)
+    for (int y = 0; y < image_dst.rows; y++)
     {
-      int current_depth = depth_src.at<unsigned char>(y, x);
-      if (current_depth <= depth && current_depth > 0)
+      auto current = depth_map.at<unsigned char>(y, x);
+      if (current <= depth_level)
       {
-        cv::Mat kernel = kernels.at(current_depth);
-
-        if (kernel.empty())
-        {
-          kernel = gaussianKernel(static_cast<double>(depth) / static_cast<double>(current_depth));
-          kernels.at(current_depth) = kernel;
-        }
-        dst.at<cv::Vec3b>(y, x) = depthGaussianAt(src, depth_src, depth, kernel, x, y);
+        image_dst.at<cv::Vec3b>(y, x) = depthBlurAt(image_src, depth_map, kernel, depth_level, x, y);
       }
     }
   }
 
-  return dst;
+  return image_dst;
+}
+
+cv::Mat evolvDepthBlur(const cv::Mat &image_src, const cv::Mat &depth_map, int depth_level)
+{
+  cv::Mat image_dst;
+  image_src.copyTo(image_dst);
+
+  std::map<uchar, cv::Mat> kernels;
+
+  double factor = depth_level <= 85 ? 1. : depth_level <= 170 ? 2.
+                                                              : 3.;
+
+  for (int x = 0; x < image_dst.cols; x++)
+  {
+    for (int y = 0; y < image_dst.rows; y++)
+    {
+      auto current = depth_map.at<unsigned char>(y, x) != 0 ? depth_map.at<unsigned char>(y, x) : depth_level / factor;
+      if (current <= depth_level)
+      {
+        cv::Mat kernel;
+        auto it = kernels.find(current);
+        if (it != kernels.end())
+        {
+          kernel = it->second;
+        }
+        else
+        {
+          kernel = gaussianKernel(factor * static_cast<double>(depth_level) / (static_cast<double>(current)));
+          kernels.emplace(current, kernel);
+        }
+
+        image_dst.at<cv::Vec3b>(y, x) = depthBlurAt(image_src, depth_map, kernel, depth_level, x, y);
+      }
+    }
+  }
+
+  return image_dst;
+}
+
+void usage(char **argv)
+{
+  std::cout << "usage: " << argv[0] << " image depth_image depth_level blur_type" << std::endl;
+  exit(-1);
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -127,10 +172,16 @@ int main(int argc, char **argv)
 {
   // check arguments
 
-  if (argc != 4)
+  if (argc != 5)
   {
-    std::cout << "usage: " << argv[0] << "image depth_image depth_level" << std::endl;
-    return -1;
+    usage(argv);
+  }
+
+  std::string blur_type = argv[4];
+
+  if (blur_type.compare("evolve") != 0 && blur_type.compare("clean") != 0)
+  {
+    usage(argv);
   }
 
   // load the input image
@@ -152,15 +203,14 @@ int main(int argc, char **argv)
 
   std::cout << "image size : " << image.cols << " x " << image.rows << std::endl;
 
-  cv::Mat blur = depthBlur(image, depth, std::stoi(argv[3]));
+  cv::Mat blured = blur_type.compare("evolve") == 0 ? evolvDepthBlur(image, depth, std::stoi(argv[3])) : cleanDepthBlur(image, depth, std::stoi(argv[3]));
 
   // setup a window
-  cv::namedWindow("image", 1);
-  cv::imshow("image", image);
-  cv::imshow("depth", depth);
-  cv::imshow("depth blur", blur);
+  cv::imshow("image source", image);
+  cv::imshow("depth map", depth);
+  cv::imshow("depth blur", blured);
   cv::waitKey(0);
-  cv::imwrite("../../output/depth_blur.jpg", blur);
+  cv::imwrite("../../output/depth_blur.jpg", blured);
 
   return 1;
 }

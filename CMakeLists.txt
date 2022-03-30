@@ -12,7 +12,7 @@ message(FATAL_ERROR “OpenCV version is not compatible : ${OpenCV_VERSION}”)
 endif()
 
 # compilation flags
-set(CMAKE_CXX_FLAGS "-Wall -g -O2 -std=c++11")
+set(CMAKE_CXX_FLAGS "-Wall -Wno-comment -g -O2 -std=c++11")
 
 # put the binary files in this directory
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
